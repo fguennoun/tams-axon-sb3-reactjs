@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Aggregator/Parent POM for the tams-backe-end-axon-sb3 multi-module project -->
+    <groupId>io.fullstackbasics</groupId>
+    <artifactId>tams-backe-end-axon-sb3</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>tams-backe-end-axon-sb3</name>
+    <description>Parent aggregator project for TAMS backend services (Axon, Spring Boot 3)</description>
+
+    <modules>
+        <module>career-portal-service</module>
+        <module>talent-fulfillment-service</module>
+        <module>talent-request-service</module>
+        <module>tams-api-gateway</module>
+        <module>tams-core-api</module>
+        <module>tams-discovery-service</module>
+    </modules>
+
+    <!--
+      Note:
+      - Each child module currently manages its own Spring Boot parent and dependencies.
+      - If you want central dependencyManagement or pluginManagement, we can add it here later.
+    -->
+</project>

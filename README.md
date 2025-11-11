@@ -178,3 +178,36 @@ Notes:
 - Centralize dependencyManagement in the parent POM (versions for Spring Boot, Axon, Spring Cloud) to ensure alignment across modules.
 - Add docker compose services for Eureka and the API Gateway to enable one-command startup.
 - Introduce profiles for dev/test/prod, and persistent databases for projections.
+
+
+
+## 6a) Startup roadmap (recommended order)
+
+Follow this order to bring the stack up cleanly for local development and UI testing:
+
+1. Axon Server (events, commands, queries backbone)
+   - docker compose up -d
+   - Axon UI: http://localhost:8024, gRPC: 8124
+2. Eureka Discovery (service registry)
+   - mvn -f tams-backe-end-axon-sb3/tams-discovery-service/pom.xml spring-boot:run
+   - Dashboard: http://localhost:8761
+3. API Gateway (edge routing through Eureka)
+   - mvn -f tams-backe-end-axon-sb3/tams-api-gateway/pom.xml spring-boot:run
+   - Base URL: http://localhost:8080
+4. Business services (register to Eureka; ports are random by default)
+   - career-portal-service: mvn -f tams-backe-end-axon-sb3/career-portal-service/pom.xml spring-boot:run
+   - talent-request-service: mvn -f tams-backe-end-axon-sb3/talent-request-service/pom.xml spring-boot:run
+   - talent-fulfillment-service: mvn -f tams-backe-end-axon-sb3/talent-fulfillment-service/pom.xml spring-boot:run
+5. React front-end (consumes the Gateway)
+   - cd tams-uat-front-end-react && npm install && npm start
+   - App: http://localhost:3000
+
+Notes:
+- You can start the business services before the Gateway; they will appear in Eureka once up. Starting Gateway early provides a consistent URL for the UI.
+- Ensure each service can reach Axon Server at localhost:8124 (see section 7 for Axon properties).
+- If ports 8761 or 8080 are busy, adjust configurations or stop conflicting processes.
+
+
+## 6b) Manual test scenarios via React
+
+See RUN-TESTS.md for a hands-on guide to validate the end-to-end flows through the React UI (smoke checks, creating a Talent Request, optional fulfillment/posting, troubleshooting).

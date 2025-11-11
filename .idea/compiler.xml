@@ -2,6 +2,7 @@
 <project version="4">
   <component name="CompilerConfiguration">
     <annotationProcessing>
+      <profile default="true" name="Default" enabled="true" />
       <profile name="Maven default annotation processors profile" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
@@ -10,6 +11,7 @@
         <module name="career-portal-service" />
         <module name="talent-request-service" />
         <module name="tams-discovery-service" />
+        <module name="tams-api-gateway" />
         <module name="tams-core-api" />
       </profile>
     </annotationProcessing>
@@ -19,6 +21,7 @@
       <module name="career-portal-service" options="-parameters" />
       <module name="talent-fulfillment-service" options="-parameters" />
       <module name="talent-request-service" options="-parameters" />
+      <module name="tams-api-gateway" options="-parameters" />
       <module name="tams-core-api" options="-parameters" />
       <module name="tams-discovery-service" options="-parameters" />
     </option>

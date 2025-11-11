@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/TAMS.iml" filepath="$PROJECT_DIR$/.idea/TAMS.iml" />
+      <module fileurl="file://$PROJECT_DIR$/career-portal-service/career-portal-service.iml" filepath="$PROJECT_DIR$/career-portal-service/career-portal-service.iml" />
+      <module fileurl="file://$PROJECT_DIR$/talent-fulfillment-service/talent-fulfillment-service.iml" filepath="$PROJECT_DIR$/talent-fulfillment-service/talent-fulfillment-service.iml" />
+      <module fileurl="file://$PROJECT_DIR$/talent-request-service/talent-request-service.iml" filepath="$PROJECT_DIR$/talent-request-service/talent-request-service.iml" />
+      <module fileurl="file://$PROJECT_DIR$/tams-api-gateway/tams-api-gateway.iml" filepath="$PROJECT_DIR$/tams-api-gateway/tams-api-gateway.iml" />
+      <module fileurl="file://$PROJECT_DIR$/tams-core-api/tams-core-api.iml" filepath="$PROJECT_DIR$/tams-core-api/tams-core-api.iml" />
+      <module fileurl="file://$PROJECT_DIR$/tams-discovery-service/tams-discovery-service.iml" filepath="$PROJECT_DIR$/tams-discovery-service/tams-discovery-service.iml" />
+    </modules>
+  </component>
+</project>

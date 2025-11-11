@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile default="true" name="Default" enabled="true" />
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="talent-fulfillment-service" />
+        <module name="career-portal-service" />
+        <module name="talent-request-service" />
+        <module name="tams-api-gateway" />
+        <module name="tams-discovery-service" />
+        <module name="tams-core-api" />
+      </profile>
+    </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="career-portal-service" target="17" />
+      <module name="talent-fulfillment-service" target="17" />
+      <module name="talent-request-service" target="17" />
+      <module name="tams-api-gateway" target="17" />
+      <module name="tams-core-api" target="17" />
+      <module name="tams-discovery-service" target="17" />
+    </bytecodeTargetLevel>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="career-portal-service" options="-parameters" />
+      <module name="talent-fulfillment-service" options="-parameters" />
+      <module name="talent-request-service" options="-parameters" />
+      <module name="tams-api-gateway" options="-parameters" />
+      <module name="tams-core-api" options="-parameters" />
+      <module name="tams-discovery-service" options="-parameters" />
+    </option>
+  </component>
+</project>

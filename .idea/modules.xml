@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/tams-backe-end-axon-sb3/tams-api-gateway/tams-api-gateway.iml" filepath="$PROJECT_DIR$/tams-backe-end-axon-sb3/tams-api-gateway/tams-api-gateway.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/tams-axon-sb3-reactjs.iml" filepath="$PROJECT_DIR$/.idea/tams-axon-sb3-reactjs.iml" />
+      <module fileurl="file://$PROJECT_DIR$/tams-backe-end-axon-sb3/tams-core-api/tams-core-api.iml" filepath="$PROJECT_DIR$/tams-backe-end-axon-sb3/tams-core-api/tams-core-api.iml" />
+    </modules>
+  </component>
+</project>

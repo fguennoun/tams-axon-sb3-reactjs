@@ -22,7 +22,7 @@ Le système répond à 3 besoins métier fondamentaux :
 [Hiring Manager]         [Talent Acquisition]        [Career Portal]
       |                         |                          |
       |-- Crée TalentRequest -->|                          |
-      |   (status=OPEN)        |                          |
+      |   (status=OPEN)         |                          |
       |                         |-- Examine la demande --> |
       |                         |-- Approuve (APPROVED) -> |
       |                         |                          |
@@ -257,11 +257,11 @@ public void on(TalentRequestCreatedEvent event) {
 ```
                     +---------------------------+
                     |       API Gateway         |
-                    |     (localhost:8080)       |
+                    |     (localhost:8080)      |
                     +----+------------------+---+
                          |                  |
-                    POST /               GET /
-               (Command Side)      (Query Side)
+                     POST /               GET /
+                    (Command Side)      (Query Side)
                          |                  |
                     +----+----+      +------+------+
                     | Command |      | Query       |
@@ -269,9 +269,9 @@ public void on(TalentRequestCreatedEvent event) {
                     +----+----+      +------+------+
                          |                  |
                     +----+----+      +------+------+
-                    | Aggregate|      | Query      |
-                    | (Event   |      | Handlers   |
-                    | Sourced) |      | (JPA Read) |
+                    | Aggregate|     |  Query      |
+                    | (Event   |     |  Handlers   |
+                    | Sourced) |     |  (JPA Read) |
                     +---------+      +------------+
                          |
                     +----+----+
@@ -339,18 +339,18 @@ talent-request-service/
        |  createTalentRequest(command)
        |  → commandGateway.send(command)
        v
-[CommandGateway] ─────────────────────────────────────────┐
+[CommandGateway] ──────────────────────────────────────────┐
        |                                                   |
        v                                                   |
 [TalentRequestAggregate]                                   |
-       | @CommandHandler                                    |
-       | AggregateLifecycle.apply(event)                    |
+       | @CommandHandler                                   |
+       | AggregateLifecycle.apply(event)                   |
        v                                                   |
 [TalentRequestCreatedEvent]                                |
        |                                                   |
        +----------+-----------+----------+                 |
        |          |           |          |                 |
-       v          v           v          v                 |
+       v          v           v          v                 v
    [Axon ES]  [EventSourcing]  [EventHandler]  [TalentRequestSaga]
    (stocke)   (reconstruit     (projette dans    (déclenche la
                état courant)    BDD H2)          prochaine étape)
@@ -441,16 +441,16 @@ services:
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                              CLIENT (Navigateur)                             │
-│                         http://localhost:3000                                 │
+│                         http://localhost:3000                                │
 │                      React + Redux Toolkit + Axios                           │
 └──────────────────────────┬───────────────────────────────────────────────────┘
                            │ HTTP
                            ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                    tams-api-gateway (Spring Cloud Gateway)                     │
-│                          http://localhost:8080                                 │
-│                  discovery.locator.enabled=true                               │
-│                  Routes automatiques via Eureka                               │
+│                    tams-api-gateway (Spring Cloud Gateway)                   │
+│                          http://localhost:8080                               │
+│                  discovery.locator.enabled=true                              │
+│                  Routes automatiques via Eureka                              │
 └─────┬─────────────────────┬─────────────────────┬────────────────────────────┘
       │                     │                     │
       ▼                     ▼                     ▼
@@ -467,22 +467,22 @@ services:
 │ talent-     │   │ fulfillment      │   │                  │
 │ request     │   │                  │   │                  │
 └──────┬──────┘   └───────┬──────────┘   └────────┬─────────┘
-       │                  │                        │
-       │    ┌─────────────┴──────────────┐         │
-       │    │  Axon Server (gRPC :8124)  │         │
-       │    │  - Event Store             │         │
-       │    │  - Command Bus             │         │
-       │    │  - Query Bus               │         │
-       │    │  - Saga Manager            │         │
-       │    └─────────────┬──────────────┘         │
-       │                  │                        │
-       │    ┌─────────────┴──────────────┐         │
-       └────┤  tams-discovery-service    ├─────────┘
+       │                  │                       │
+       │    ┌─────────────┴──────────────┐        │
+       │    │  Axon Server (gRPC :8124)  │        │
+       │    │  - Event Store             │        │
+       │    │  - Command Bus             │        │
+       │    │  - Query Bus               │        │
+       │    │  - Saga Manager            │        │
+       │    └─────────────┬──────────────┘        │
+       │                  │                       │
+       │    ┌─────────────┴──────────────┐        │
+       └────┤  tams-discovery-service    ├────────┘
             │  (Eureka - port 8761)      │
             └────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                        tams-core-api (Librairie partagée)                     │
+│                        tams-core-api (Librairie partagée)                    │
 │                                                                              │
 │  Domain:        CoreSkill, SkillLevel, EmploymentType, RoleLevel,            │
 │                 RequestStatus, JobDescription, CandidateSkills               │
@@ -492,7 +492,7 @@ services:
 │                                                                              │
 │  Events:        JobPostCreatedEvent, TalentFulfillmentCreatedEvent           │
 │                                                                              │
-│  Config:        AxonXStreamConfig                                           │
+│  Config:        AxonXStreamConfig                                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -631,14 +631,14 @@ job_posts (career-portal-service)
 Hiring Manager          React            API Gateway    talent-request    talent-fulfillment   career-portal     Axon Server
      |                    |                  |               |                  |                  |                  |
      |-- POST /create --->|                  |               |                  |                  |                  |
-     |                    |-- /talent- -->    |               |                  |                  |                  |
-     |                    |   request         |               |                  |                  |                  |
-     |                    |                  |-- POST ------->|                  |                  |                  |
-     |                    |                  |   /talent-     |                  |                  |                  |
-     |                    |                  |   request      |                  |                  |                  |
-     |                    |                  |               |-- CreateTalent--->|                  |                  |
-     |                    |                  |               |   RequestCommand  |                  |                  |
-     |                    |                  |               |                  |-- store event --->|                  |
+     |                    |-- /talent- -->   |               |                  |                  |                  |
+     |                    |   request        |               |                  |                  |                  |
+     |                    |                  |-- POST ------>|                  |                  |                  |
+     |                    |                  |   /talent-    |                  |                  |                  |
+     |                    |                  |   request     |                  |                  |                  |
+     |                    |                  |               |-- CreateTalent-->|                  |                  |
+     |                    |                  |               |   RequestCommand |                  |                  |
+     |                    |                  |               |                  |-- store event -->|                  |
      |                    |                  |               |-- TalentRequest--|                  |                  |
      |                    |                  |               |   CreatedEvent   |                  |                  |
      |                    |                  |               |                  |                  |                  |
@@ -655,19 +655,19 @@ Hiring Manager          React            API Gateway    talent-request    talent
      |                    |                  |               |                  |                  |                  |
      |                    |                  |               |                  |                  |                  |
      |                    |                  |               |                  |                  |                  |
-  Talent Acquisition     |                  |               |                  |                  |                  |
+  Talent Acquisition      |                  |               |                  |                  |                  |
      |                    |                  |               |                  |                  |                  |
      |-- GET /talent ---->|                  |               |                  |                  |                  |
-     |   fulfillment      |-- /talent- ---->|               |                  |                  |                  |
+     |   fulfillment      |--- /talent- ---->|               |                  |                  |                  |
      |                    |   fulfillment    |-- GET ------->|                  |                  |                  |
      |                    |                  |               |-- Query -------->|                  |                  |
      |                    |                  |               |   all fulfill    |                  |                  |
-     |                    |<-- list --------|               |                  |                  |                  |
+     |                    |<--- list --------|               |                  |                  |                  |
      |                    |                  |               |                  |                  |                  |
      |-- POST /approve -->|                  |               |                  |                  |                  |
-     |                    |-- /talent- ---->|               |                  |                  |                  |
+     |                    |--- /talent- ---->|               |                  |                  |                  |
      |                    |   fulfillment    |-- POST ------>|                  |                  |                  |
-     |                    |   /job-post      |               |   SubmitTalent--->|                  |                  |
+     |                    |   /job-post      |               |   SubmitTalent-->|                  |                  |
      |                    |                  |               |   Fulfillment    |                  |                  |
      |                    |                  |               |   DecisionCmd    |                  |                  |
      |                    |                  |               |                  |-- TalentFulfill--|                  |
@@ -675,23 +675,23 @@ Hiring Manager          React            API Gateway    talent-request    talent
      |                    |                  |               |                  |   SubmittedEvent |                  |
      |                    |                  |               |                  |                  |                  |
      |                    |                  |               |                  |====== SAGA ======|                  |
-     |                    |                  |               |                  | JobPostCreationSaga                  |
+     |                    |                  |               |                  | JobPostCreationSaga                 |
      |                    |                  |               |                  |                  |                  |
      |                    |                  |               |                  |-- CreateJobPost->|                  |
-     |                    |                  |               |                  |   Command        |-- store event ->|
+     |                    |                  |               |                  |   Command        |-- store event -> |
      |                    |                  |               |                  |                  |                  |
      |                    |                  |               |<-- UpdateStatus -|                  |                  |
      |                    |                  |               |   Cmd (APPROVED) |                  |                  |
      |                    |                  |               |                  |                  |                  |
      |                    |                  |               |                  |                  |                  |
-  Candidat               |                  |               |                  |                  |                  |
+  Candidat                |                  |               |                  |                  |                  |
      |                    |                  |               |                  |                  |                  |
      |-- GET /career ---->|                  |               |                  |                  |                  |
-     |   portal/job-posts |-- /career- ---->|               |                  |                  |                  |
+     |   portal/job-posts |--- /career- ---->|               |                  |                  |                  |
      |                    |   portal/job-    |-- GET ------->|                  |                  |                  |
-     |                    |   posts          |               |                  |                  |-- Query ------->|
-     |                    |                  |               |                  |                  |   all job posts |
-     |                    |<-- job posts ---|               |                  |                  |                  |
+     |                    |   posts          |               |                  |                  |--- Query ------->|
+     |                    |                  |               |                  |                  |    all job posts |
+     |                    |<--- job posts ---|               |                  |                  |                  |
      |                    |                  |               |                  |                  |                  |
 ```
 

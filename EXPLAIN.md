@@ -497,9 +497,9 @@ talent-request-service/
 | `Repository` | Interface JPA standard pour les opérations de lecture |
 | Entity | `@Entity` JPA mappée sur la table de projection |
 
-### Flux complet des données
+### Flux complet des données (End-to-End)
 
-```                   
+```
 [Hiring Manager]
        |
        | POST /talent-request  (via API Gateway → talent-request-service)
@@ -511,30 +511,112 @@ talent-request-service/
        |  createTalentRequest(command)
        |  → commandGateway.send(command)
        v
-[CommandGateway] ──────────────────────────────────────────┐
-       |                                                   |
-       v                                                   |
-[TalentRequestAggregate]                                   |
-       | @CommandHandler                                   |
-       | AggregateLifecycle.apply(event)                   |
-       v                                                   |
-[TalentRequestCreatedEvent]                                |
-       |                                                   |
-       +----------+-----------+----------+                 |
-       |          |           |          |                 |
-       v          v           v          v                 v
+[CommandGateway]
+       |
+       v
+[TalentRequestAggregate]
+       | @CommandHandler
+       | AggregateLifecycle.apply(event)
+       v
+[TalentRequestCreatedEvent]
+       |
+       +----------+-----------+----------+
+       |          |           |          |
+       v          v           v          v
    [Axon ES]  [EventSourcing]  [EventHandler]  [TalentRequestSaga]
    (stocke)   (reconstruit     (projette dans    (déclenche la
                état courant)    BDD H2)          prochaine étape)
-                                                  |
-                                                  v
-                                     [CreateTalentFulfillmentCommand]
-                                                  |
-                                                  v
-                      [TalentFulfillmentAggregate]
-                                                   .
-                                                   .
-                                                   .
+                                                   |
+                                                   v
+                                      [CreateTalentFulfillmentCommand]
+                                                   |
+                                                   v
+                              [TalentFulfillmentAggregate]
+                                   | @CommandHandler
+                                   | AggregateLifecycle.apply(event)
+                                   v
+                          [TalentFulfillmentCreatedEvent]
+                                   |
+                                   +----------+----------+
+                                   |          |          |
+                                   v          v          v
+                               [Axon ES]  [EventSourcing]  [EventHandler]
+                               (stocke)   (reconstruit     (projette dans
+                                            état courant)    BDD H2)
+                                                          |
+                                   [TalentRequestSaga] ←--+ (fin)
+                                   (reçoit événement,
+                                    envoie UpdateStatus
+                                    envoie UpdateStatusCmd)
+                                          |
+                                          v
+                              [TalentRequestAggregate]
+                              (status → ASSIGNED_TO_TA)
+                                          |
+                                          v
+                                   [Nouvel événement]
+                                   (TalentRequestStatusUpdatedEvent)
+
+              ═══════ Étape 2 : Approbation par Talent Acquisition ═══════
+
+[Talent Acquisition Specialist]
+       |
+       | POST /talent-fulfillment/job-post  (via API Gateway)
+       v
+[TalentFulfillmentCommandController]
+       |
+       v
+[TalentFulfillmentService]
+       |  submitFulfillmentDecision(command)
+       |  → commandGateway.send(command)
+       v
+[CommandGateway]
+       |
+       v
+[TalentFulfillmentAggregate]
+       | @CommandHandler (SubmitTalentFulfillmentDecisionCommand)
+       | AggregateLifecycle.apply(event)
+       v
+[TalentFulfillmentDecisionSubmittedEvent]
+       |
+       +----------+-----------+----------+
+       |          |           |          |
+       v          v           v          v
+   [Axon ES]  [EventSourcing]  [EventHandler]  [JobPostCreationSaga]
+   (stocke)   (reconstruit     (projette dans    (déclenche la
+               état courant)    BDD H2)          création du job)
+                                                   |
+                                                   v
+                                      [CreateJobPostCommand]
+                                                   |
+                                                   v
+                                       [JobPostAggregate]
+                                        (career-portal-service)
+                                            | @CommandHandler
+                                            | AggregateLifecycle.apply(event)
+                                            v
+                                       [JobPostCreatedEvent]
+                                            |
+                                            +----------+----------+
+                                            |          |          |
+                                            v          v          v
+                                        [Axon ES]  [EventSourcing]  [EventHandler]
+                                        (stocke)   (reconstruit     (projette dans
+                                                     état courant)    BDD job_posts)
+                                                                       |
+                                                                 [Career Portal]
+                                                                 (lecture H2)
+
+                                            [JobPostCreationSaga] ←--+ (fin)
+                                            (reçoit JobPostCreatedEvent)
+                                                   |
+                                                   v
+                                      [UpdateTalentRequestStatusCommand]
+                                      (status → APPROVED)
+                                                   |
+                                                   v
+                                      [TalentRequestAggregate]
+                                      (status mis à jour)
 ```
 
 ### Validation des Commandes
@@ -1028,21 +1110,21 @@ Hiring Manager          React            API Gateway    talent-request    talent
 ### Pyramide de test pour TAMS
 
 ```
-            ╱╲
-           ╱  ╲
-          ╱ E2E╲          ← Tests end-to-end (Cypress, Playwright)
-         ╱______╲
-        ╱        ╲
-       ╱  Saga    ╲       ← Tests de sagas (Axon Test Fixtures)
-      ╱  Tests     ╲
-     ╱______________╲
-    ╱                ╲
-   ╱  Integration     ╲   ← Tests Spring Boot slices (@WebMvcTest, @DataJpaTest)
-  ╱  Tests             ╲
- ╱______________________╲
-╱                        ╲
-╱  Unit Tests (JUnit 5)   ╲  ← Tests d'aggregates, handlers, services
-╱__________________________╲
+              ╱╲
+             ╱  ╲
+            ╱E2E ╲          ← Tests end-to-end (Cypress, Playwright)
+           ╱______╲
+          ╱        ╲
+         ╱  Saga    ╲       ← Tests de sagas (Axon Test Fixtures)
+        ╱   Tests    ╲
+       ╱______________╲
+      ╱                ╲
+     ╱  Integration     ╲   ← Tests Spring Boot slices (@WebMvcTest, @DataJpaTest)
+    ╱      Tests         ╲
+   ╱______________________╲
+  ╱                        ╲
+ ╱  Unit Tests (JUnit 5)    ╲  ← Tests d'aggregates, handlers, services
+╱____________________________╲
 ```
 
 ### 1. Tests Unitaires — Aggregates (Axon Fixtures)

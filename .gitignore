@@ -1,5 +1,5 @@
 # Ignore everything by default
-*
+/*
 
 # Keep only this ignore file itself tracked
 !.gitignore
@@ -7,3 +7,25 @@
 # Allow documentation files at root
 !EXPLAIN.md
 !*.md
+
+# Allow root pom.xml
+!pom.xml
+
+# Allow all backend modules (already tracked)
+!tams-discovery-service/
+!tams-api-gateway/
+!tams-core-api/
+!talent-request-service/
+!talent-fulfillment-service/
+!career-portal-service/
+!tams-backe-end-axon-sb3/
+
+# Allow frontend React directory
+!tams-uat-front-end-react/
+!tams-uat-front-end-react/**
+# But exclude node_modules, build, env files within frontend
+/tams-uat-front-end-react/node_modules/
+/tams-uat-front-end-react/build/
+/tams-uat-front-end-react/coverage/
+/tams-uat-front-end-react/.env.local
+/tams-uat-front-end-react/.env.*.local

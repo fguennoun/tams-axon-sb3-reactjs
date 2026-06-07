@@ -66,6 +66,12 @@
 		</dependency>
 
 		<dependency>
+			<groupId>io.netty</groupId>
+			<artifactId>netty-common</artifactId>
+			<version>4.1.100.Final</version>
+		</dependency>
+
+		<dependency>
 			<groupId>fullstackbasics.io</groupId>
 			<artifactId>tams-core-api</artifactId>
 			<version>0.0.1-SNAPSHOT</version>

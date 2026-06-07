@@ -819,9 +819,9 @@ function CreateTalentRequestForm() {
 ### Diagramme
 
 ```
-                    ┌──────────────────────────────────────────────────┐
-                    │                   Component                      │
-                    │  (Affiche UI + Dispatch actions + Select state)  │
+                    ┌─────────────────────────────────────────────────┐
+                    │                   Component                     │
+                    │  (Affiche UI + Dispatch actions + Select state) │
                     └──────┬──────────────────────────────┬───────────┘
                            │                              │
                     useSelector()                   dispatch()
@@ -844,7 +844,7 @@ function CreateTalentRequestForm() {
                            │                              │
                            │                              ▼
                            │                    ┌──────────────────────┐
-                           │                    │  API Gateway :8080    │
+                           │                    │  API Gateway :8080   │
                            │                    │  → Backend Axon      │
                            │                    └──────────────────────┘
 ```
@@ -897,20 +897,20 @@ function CreateTalentRequestForm() {
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Components/          Pages/                         │
+│  Components/          Pages/                        │
 │    BackButton.jsx       TAMSHome.jsx                │
-│    Header.jsx          (UI pure, dispatch, select)   │
-│    LoadingSpinner.jsx                                │
-│    *View.jsx                                         │
-│    *Item.jsx                                         │
+│    Header.jsx          (UI pure, dispatch, select)  │
+│    LoadingSpinner.jsx                               │
+│    *View.jsx                                        │
+│    *Item.jsx                                        │
 ├─────────────────────────────────────────────────────┤
-│  Features/                                           │
-│    talentRequestSlice.js    (State + Reducers)       │
-│    talentRequestService.js  (API calls)              │
+│  Features/                                          │
+│    talentRequestSlice.js    (State + Reducers)      │
+│    talentRequestService.js  (API calls)             │
 ├─────────────────────────────────────────────────────┤
-│  App.js                     (Routes + Layout)        │
-│  index.js                   (Provider + Bootstrap)   │
-│  index.css                  (Styles globaux)          │
+│  App.js                     (Routes + Layout)       │
+│  index.js                   (Provider + Bootstrap)  │
+│  index.css                  (Styles globaux)        │
 └─────────────────────────────────────────────────────┘
 ```
 

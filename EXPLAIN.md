@@ -73,9 +73,37 @@ tams-backe-end-axon-sb3/
 
 ### Communication inter-services
 
-- **Commandes/Événements** : via Axon Server (gRPC, port 8124)
-- **Requêtes HTTP** : via API Gateway → Eureka → service
-- **Sagas** : orchestration longue durée entre talent-request-service et talent-fulfillment-service
+| Mode | Protocole | Cas d'usage | Avantage |
+|------|-----------|-------------|----------|
+| **Commandes/Événements** | Axon Server gRPC (port 8124) | Mutation d'aggregat, propagation d'événements | Couplage faible, asynchrone, journalisé |
+| **Requêtes HTTP (lecture)** | API Gateway → Eureka → REST | GET queries, affichage portail | Réponse synchrone, familiarité REST |
+| **Sagas** | Axon Saga Manager (gRPC) | Orchestration longue durée multi-services | Garantie de cohérence finale, compensation |
+
+### Patterns de résilience
+
+- **Bulkhead** : Axon segmente chaque Event Processor Group avec son propre pool de threads (`threadCount`), isolant les pannes entre projections.
+- **Retry with exponential backoff** : Axon retente automatiquement les commandes échouées (configurable via `axon.command.retry.max-count` et `axon.command.retry.backoff-delay`).
+- **Idempotency** : Les événements sont naturellement idempotents (traitement `@EventHandler` peut être rejoué sans effet de bord). Les commandes incluent un identifiant unique (`commandId`) pour la déduplication côté Aggregate.
+- **Dead Letter Queue** : Axon Enterprise propose une DLQ pour les événements qui échouent après tous les tentatives ; en dev-mode, ils sont simplement loggés.
+
+### API Versioning
+
+Les événements dans l'Event Store sont immortels. La stratégie de versioning est implicite :
+
+```java
+// Version 1 : champ unique CoreSkill
+public class CandidateSkills {
+    private CoreSkill coreSkill;
+    private SkillLevel skillLevel;
+}
+
+// Version 2 (future) : liste de compétences
+// Upcaster requis pour migrer v1 → v2 dans l'Event Store
+```
+
+- **Backward-compatible** : ajout de champs optionnels uniquement (valeur par défaut dans `@EventSourcingHandler`)
+- **Breaking change** : nécessite un `Upcaster` (cf. section 4)
+- **Dép récation** : les vieux champs sont annotés `@Deprecated` mais jamais supprimés des classes d'événements
 
 ### Démarrage (ordre requis)
 
@@ -170,6 +198,66 @@ JobPostCreationSaga (dans talent-fulfillment-service)
      → envoie UpdateTalentRequestStatusCommand (statut → APPROVED)
 ```
 
+### Agrégation & Limites (Bounded Contexts)
+
+Chaque aggregate est conçu dans son propre **Bounded Context** :
+
+| Bounded Context | Aggregate | Responsabilité | Événements publiés |
+|-----------------|-----------|---------------|-------------------|
+| **Recrutement** (talent-request-service) | `TalentRequestAggregate` | Gérer le cycle de vie de la demande : création, mise à jour de statut | `TalentRequestCreatedEvent`, `TalentRequestStatusUpdatedEvent` |
+| **Fulfillment** (talent-fulfillment-service) | `TalentFulfillmentAggregate` | Gérer l'approbation : attribution rôle, validation décision | `TalentFulfillmentCreatedEvent`, `TalentFulfillmentDecisionSubmittedEvent` |
+| **Carrière** (career-portal-service) | `JobPostAggregate` | Publier l'offre sur le portail | `JobPostCreatedEvent` |
+
+La separation en 3 aggregates distincts (plutôt qu'un seul monolithe) est justifiée par :
+- **Autonomie d'évolution** : chaque équipe peut modifier son aggregate sans affecter les autres
+- **Granularité transactionnelle** : les invariants d'un aggregate ne verrouillent pas les autres
+- **Séparation des préoccupations** : l'aggregate `TalentRequest` ne connaît pas `RoleLevel` ou `EmploymentType`
+
+### Invariants & Validation
+
+Les invariants sont enforceés dans les `@CommandHandler` avant `AggregateLifecycle.apply()` :
+
+```java
+@CommandHandler
+public TalentRequestAggregate(CreateTalentRequestCommand command) {
+    // Invariant : le titre est obligatoire
+    if (command.getTalentRequestTitle() == null || command.getTalentRequestTitle().isBlank()) {
+        throw new IllegalArgumentException("Talent request title is required");
+    }
+    // Invariant : la date de début doit être dans le futur
+    if (command.getStartDate() != null && command.getStartDate().isBefore(LocalDate.now())) {
+        throw new IllegalArgumentException("Start date must be in the future");
+    }
+    AggregateLifecycle.apply(new TalentRequestCreatedEvent(/* ... */));
+}
+```
+
+**Règle fondamentale** : ne jamais émettre un événement représentant un état invalide. L'aggregat est le gardien de sa propre cohérence.
+
+### Repository Patterns
+
+Dans une architecture Event Sourcing, on distingue :
+
+| Pattern | Usage dans TAMS | Implémentation |
+|---------|----------------|----------------|
+| **Repository (JPA)** | Côté Query (projection) | `JpaRepository<TalentRequest, String>` — opérations CRUD standard sur la BDD de lecture |
+| **Event Sourcing Repository** | Côté Command (aggregate) | Fourni par Axon : `AggregateRepository<TalentRequestAggregate>`. Charge l'aggregat en rejouant les événements depuis l'Event Store |
+| **Unit of Work** | Transactionnel | Axon garantit que `AggregateLifecycle.apply(event)` est atomique : soit tous les événements sont stockés, soit aucun |
+
+```java
+// Query Repository (JPA standard)
+@Repository
+public interface TalentRequestRepository extends JpaRepository<TalentRequest, String> {
+    List<TalentRequest> findByRequestStatus(RequestStatus status);
+}
+
+// Command Repository (géré par Axon)
+// Pas de code explicite — Axon utilise le AggregateRepository automatiquement
+// Injection dans le service :
+// @Autowired
+// private Repository<TalentRequestAggregate> aggregateRepository;
+```
+
 ---
 
 ## 4. Event-Driven Architecture (EDA) & Event Sourcing
@@ -247,6 +335,90 @@ public void on(TalentRequestCreatedEvent event) {
 - **Reconstruction** : possibilité de rejouer les événements pour recréer l'état à un instant T
 - **Séparation commande/requête** : la BDD de lecture (H2) est optimisée pour les requêtes
 - **Communication inter-services** : les événements servent de contrat entre services
+
+### Event Store vs. Base de Projection
+
+| Aspect | Event Store (Axon Server) | Base de Projection (H2) |
+|--------|--------------------------|------------------------|
+| **Nature** | Journal d'événements immuables (append-only) | Tables relationnelles (mises à jour, suppressions possibles) |
+| **Source de vérité** | Oui — **source of truth** | Non — dérivée, peut être reconstruite |
+| **Schéma** | Flexible — les événements évoluent avec le temps | Fixe — défini par l'entité JPA courante |
+| **Requêtes** | Impossible (pas de query directe sur l'Event Store) | SQL standard via JPA |
+| **Performance** | Écriture séquentielle rapide | Indexés pour les lectures |
+| **Stockage** | Axon Server (fichier ou JDBC selon config) | H2 en mémoire (dev) ou PostgreSQL (prod) |
+
+### Snapshots (Instantanés)
+
+Pour éviter de rejouer des milliers d'événements à chaque chargement d'aggregat :
+
+```yaml
+# application.yml — chaque service business
+axon:
+  eventhandling:
+    snapshot-trigger:
+      threshold: 50  # Déclenche un snapshot tous les 50 événements
+```
+
+```java
+@Configuration
+public class AxonSnapshotConfig {
+    @Bean
+    public SnapshotTriggerDefinition snapshotTriggerDefinition(
+            Snapshotter snapshotter) {
+        return new ThresholdSnapshotTriggerDefinition(snapshotter, 50);
+    }
+}
+```
+
+- Un snapshot capture l'état complet de l'aggregat à un instant T
+- Au chargement, Axon lit le snapshot le plus récent + les événements depuis ce snapshot
+- Réduit drastiquement le temps de chargement pour les aggregates avec un historique long
+
+### Upcasting (Migration d'Événements)
+
+Quand la structure d'un événement change (ajout/suppression/renommage de champ), un **Upcaster** transforme les anciens événements vers le nouveau format au moment de la lecture :
+
+```java
+// Exemple : migration CandidateSkills v1 (champs séparés) → v2 (objet imbriqué)
+public class CandidateSkillsUpcaster extends SingleEventUpcaster {
+
+    @Override
+    protected boolean canUpcast(IntermediateEventRepresentation event) {
+        return event.getType().equals("TalentRequestCreatedEvent");
+    }
+
+    @Override
+    protected IntermediateEventRepresentation doUpcast(
+            IntermediateEventRepresentation event) {
+        return event.upcast(
+            Map.of("com.example.event", this::transformPayload),
+            String.class
+        );
+    }
+
+    private Document transformPayload(Document document) {
+        // Extraire les champs v1, les imbriquer dans un objet
+        return new Document(document)
+            .remove("coreSkill")
+            .remove("skillLevel");
+    }
+}
+```
+
+- Enregistré dans le package `upcaster/` de `tams-core-api`
+- Se déclenche automatiquement à la lecture des événements depuis l'Event Store
+- **Ne modifie jamais** les événements stockés (immutabilité)
+- Versionné : chaque upcaster a son propre numéro de séquence
+
+### Event Schema Evolution — Règles
+
+| Type de changement | Compatible ? | Action requise |
+|-------------------|-------------|----------------|
+| Ajout d'un champ optionnel | Oui | Valeur par défaut dans `@EventSourcingHandler` |
+| Ajout d'un champ obligatoire | Non | Upcaster requis, valeur par défaut |
+| Renommage d'un champ | Non | Upcaster + `@Deprecated` sur l'ancien champ |
+| Suppression d'un champ | Oui | Upcaster pour ignorer l'ancien champ, puis suppression dans la classe |
+| Changement de type d'un champ | Non | Upcaster pour transformer le type |
 
 ---
 
@@ -359,11 +531,79 @@ talent-request-service/
                                      [CreateTalentFulfillmentCommand]
                                                   |
                                                   v
-                                        [TalentFulfillmentAggregate]
-                                                  .
-                                                  .
-                                                  .
+                      [TalentFulfillmentAggregate]
+                                                   .
+                                                   .
+                                                   .
 ```
+
+### Validation des Commandes
+
+La validation intervient à 3 niveaux :
+
+| Niveau | Lieu | Exemple | Comportement en cas d'échec |
+|--------|------|---------|---------------------------|
+| **Contrat HTTP** | `CommandController` / DTO | `@NotBlank talentRequestTitle` | 400 Bad Request avant d'atteindre Axon |
+| **Métier (invariant)** | `@CommandHandler` de l'aggregate | Vérification `requestStatus` avant transition | Exception levée → commande annulée, aucun événement stocké |
+| **Technique (Axon)** | Intercepteur `CommandDispatchInterceptor` | Validation de structure, logging, autorisation | Intercepteur rejette la commande avant routage |
+
+```java
+// Intercepteur de commande côté expéditeur
+@Component
+public class ValidationCommandDispatchInterceptor
+        implements CommandDispatchInterceptor {
+
+    @Override
+    public CommandMessage<?> handle(CommandMessage<?> commandMessage) {
+        // Logique de pré-validation transverse
+        if (commandMessage.getPayload() instanceof CreateTalentRequestCommand cmd) {
+            if (cmd.getTalentRequestTitle() == null) {
+                throw new IllegalArgumentException("Title is required");
+            }
+        }
+        return commandMessage;
+    }
+}
+```
+
+### Idempotence des Commandes
+
+Dans un système distribué, une commande peut être émise plusieurs fois (retry, timeout, double-click). Stratégies :
+
+```java
+// 1. Identifiant unique de commande dans l'Event Store
+// Axon déduplique automatiquement si le même événement est déjà stocké
+
+// 2. Token d'idempotence côté client (frontend)
+// Généré par React et envoyé dans le header X-Idempotency-Key
+// Vérifié par un CommandDispatchInterceptor avant routage
+```
+
+- **Idempotence naturelle** : les commandes `Create*` échouent si l'aggregat existe déjà (contrainte d'unicité du identifiant)
+- **Idempotence des événements** : `@EventSourcingHandler` est conçu pour être appelé plusieurs fois sans effet de bord
+- **Token bucket** : en production, stocker les tokens d'idempotence dans Redis avec TTL
+
+### Optimisation du Modèle de Requêtes
+
+```java
+// Query personnalisée avec filtres
+public class FindTalentRequestsByStatusQuery {
+    private RequestStatus status;
+    // constructeur, getters
+}
+
+// Query Handler
+@QueryHandler
+public List<TalentRequest> handle(FindTalentRequestsByStatusQuery query) {
+    return talentRequestRepository.findByRequestStatus(query.getStatus());
+}
+```
+
+- **Requêtes dédiées** : chaque query sert un cas d'usage précis (pas de GenericQuery)
+- **Indexation JPA** : `@Table(indexes = @Index(columnList = "requestStatus"))` sur l'entité de projection
+- **DTO de réponse** : les `QueryResponseDTO` ne contiennent que les champs nécessaires à l'UI (pas de sur-fetching)
+- **Pagination** : intégrer `Pageable` pour les listes volumineuses
+- **Caching** : `@Cacheable` sur les queries en lecture fréquente (ex: liste des job posts publiés)
 
 ---
 
@@ -433,6 +673,92 @@ services:
 - **Port 8024** : Interface de gestion (visualiser événements, commandes, queries)
 - **Port 8124** : Communication gRPC pour les clients Axon
 - **Volumes** : `axon-data`, `axon-events`, `axon-config` pour la persistance
+
+### Configuration avancée (application.yml)
+
+```yaml
+axon:
+  # Bus & Event Store
+  axonserver:
+    servers: localhost:8124
+    event-store:
+      push-events: true          # Mode push pour les événements (vs polling)
+
+  # Event Handling
+  eventhandling:
+    processors:
+      talent-request-group:      # Nom du groupe de processeurs
+        mode: TRACKING           # TRACKING = événements depuis le début (replayable)
+        thread-count: 2          # Traitement parallèle des événements
+        batch-size: 100          # Taille du lot par commit
+        sequencer:               # Ordre de traitement (PER_AGGREGATE = séquentiel par aggregate)
+          type: PER_AGGREGATE
+    snapshot-trigger:
+      threshold: 50
+
+  # Command retry
+  command:
+    retry:
+      max-count: 3               # Tentatives max pour une commande
+      backoff-delay: 1000        # Délai initial (ms) entre les tentatives
+
+  # Query
+  query:
+    default:
+      timeout: 10000             # Timeout pour les queries (ms)
+```
+
+### Event Processor Groups — Modes
+
+| Mode | Description | Cas d'usage dans TAMS |
+|------|-------------|----------------------|
+| **SUBSCRIBING** | Receive des événements en temps réel (live) | Processeurs en mode par défaut |
+| **TRACKING** | Rejoue depuis le début ou depuis un jeton (token) | Projections configurées explicitement avec `mode: TRACKING` |
+| **POOLED** | Pool de threads avec token auto-géré (via JPA/JDBC ou Embedded) | Production — haute disponibilité |
+
+**Avantage TRACKING** : permet de **rejouer les projections** en cas de bug ou de nouvelle version du handler. Il suffit de réinitialiser le token :
+
+```bash
+# Via Axon Dashboard : Operations → Reset Token
+# Ou via API REST d'Axon Server
+```
+
+### Gestion des Erreurs (Error Handling)
+
+```java
+// Intercepteur de commande côté réception
+@Component
+public class ExceptionWrappingHandlerInterceptor
+        implements HandlerInterceptor {
+
+    @Override
+    public boolean handle(UnitOfWork<?> unitOfWork,
+                          InterceptorChain interceptorChain) {
+        try {
+            return interceptorChain.proceed();
+        } catch (IllegalArgumentException e) {
+            // Transformer en CommandExecutionException (serialisable)
+            throw new CommandExecutionException(e.getMessage(), e);
+        }
+    }
+}
+```
+
+| Scénario d'erreur | Comportement Axon | Stratégie |
+|-------------------|-------------------|-----------|
+| Commande invalide | `CommandExecutionException` → retour au `CommandGateway.send()` | Controller advise → 400 Bad Request |
+| Événement de projection échoué | Log + propagation (ou DLQ en Enterprise) | `@EventHandler` try/catch + compensation |
+| Timeout gRPC | Axon retente selon `retry.max-count` | Configurer un backoff adapté |
+| Saga bloquée | Saga reste en vie dans Axon Server | Dead-letter + notification ops |
+
+### Dev-Mode Axon Server
+
+La propriété `AXONIQ_AXONSERVER_DEVMODE_ENABLED=true` :
+
+- Réinitialise l'Event Store au redémarrage du conteneur Docker
+- Crée un seul contexte par défaut (pas de multi-context)
+- Active un license de développement gratuite (limitée à 3 nœuds)
+- **Ne pas utiliser en production** (perte de tous les événements au restart)
 
 ---
 
@@ -697,7 +1023,403 @@ Hiring Manager          React            API Gateway    talent-request    talent
 
 ---
 
-## 12. Points d'Extension & Améliorations Futures
+## 12. Stratégie de Test (Testing Strategy)
+
+### Pyramide de test pour TAMS
+
+```
+            ╱╲
+           ╱  ╲
+          ╱ E2E╲          ← Tests end-to-end (Cypress, Playwright)
+         ╱______╲
+        ╱        ╲
+       ╱  Saga    ╲       ← Tests de sagas (Axon Test Fixtures)
+      ╱  Tests     ╲
+     ╱______________╲
+    ╱                ╲
+   ╱  Integration     ╲   ← Tests Spring Boot slices (@WebMvcTest, @DataJpaTest)
+  ╱  Tests             ╲
+ ╱______________________╲
+╱                        ╲
+╱  Unit Tests (JUnit 5)   ╲  ← Tests d'aggregates, handlers, services
+╱__________________________╲
+```
+
+### 1. Tests Unitaires — Aggregates (Axon Fixtures)
+
+```java
+class TalentRequestAggregateTest {
+
+    private FixtureConfiguration<TalentRequestAggregate> fixture;
+
+    @BeforeEach
+    void setUp() {
+        fixture = new AggregateTestFixture<>(TalentRequestAggregate.class);
+    }
+
+    @Test
+    void shouldCreateTalentRequest() {
+        String id = UUID.randomUUID().toString();
+        fixture.givenNoPriorActivity()
+               .when(new CreateTalentRequestCommand(id, "Dev Java", /* ... */))
+               .expectSuccessfulHandlerExecution()
+               .expectEvents(new TalentRequestCreatedEvent(/* ... */));
+    }
+
+    @Test
+    void shouldRejectBlankTitle() {
+        String id = UUID.randomUUID().toString();
+        fixture.givenNoPriorActivity()
+               .when(new CreateTalentRequestCommand(id, "", /* ... */))
+               .expectException(IllegalArgumentException.class);
+    }
+
+    @Test
+    void shouldTransitionFromOpenToApproved() {
+        String id = UUID.randomUUID().toString();
+        fixture.given(new TalentRequestCreatedEvent(id, /* ... */))
+               .when(new UpdateTalentRequestStatusCommand(id, RequestStatus.APPROVED))
+               .expectEvents(new TalentRequestStatusUpdatedEvent(id, RequestStatus.APPROVED));
+    }
+}
+```
+
+### 2. Tests Unitaires — Sagas (Axon Saga Test Fixtures)
+
+```java
+class TalentRequestSagaTest {
+
+    private SagaTestFixture<TalentRequestSaga> fixture;
+
+    @BeforeEach
+    void setUp() {
+        fixture = new SagaTestFixture<>(TalentRequestSaga.class);
+        fixture.registerAggregate(TalentFulfillmentAggregate.class);
+    }
+
+    @Test
+    void shouldStartSagaOnTalentRequestCreated() {
+        String id = UUID.randomUUID().toString();
+        fixture.givenAggregate(id).published()
+               .whenAggregate(id).publishes(
+                   new TalentRequestCreatedEvent(id, "Dev Java", /* ... */))
+               .expectActiveSagas(1)
+               .expectDispatchedCommands(
+                   new CreateTalentFulfillmentCommand(/* ... */));
+    }
+
+    @Test
+    void shouldEndSagaOnFulfillmentCreated() {
+        // given: saga started
+        // when: TalentFulfillmentCreatedEvent
+        // expect: saga ends, status command dispatched
+    }
+}
+```
+
+### 3. Tests d'Intégration — Query Projections
+
+```java
+@SpringBootTest
+@AutoConfigureTestDatabase(replace = Replace.ANY)
+class TalentRequestEventHandlerTest {
+
+    @Autowired
+    private TalentRequestRepository repository;
+
+    @Autowired
+    private TalentRequestEventHandler eventHandler;
+
+    @Test
+    void shouldProjectTalentRequestCreatedEvent() {
+        String id = UUID.randomUUID().toString();
+        eventHandler.on(new TalentRequestCreatedEvent(id, "Dev Java", /* ... */));
+
+        TalentRequest entity = repository.findById(id).orElseThrow();
+        assertThat(entity.getTalentRequestTitle()).isEqualTo("Dev Java");
+        assertThat(entity.getRequestStatus()).isEqualTo(RequestStatus.OPEN);
+    }
+}
+```
+
+### 4. Tests d'Intégration — Contrôleurs REST
+
+```java
+@WebMvcTest(TalentRequestCommandController.class)
+class TalentRequestCommandControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private TalentRequestService talentRequestService;
+
+    @Test
+    void shouldReturn201OnCreate() throws Exception {
+        String body = """
+            {
+                "talentRequestTitle": "Dev Java",
+                "startDate": "2026-07-01"
+            }
+            """;
+
+        mockMvc.perform(post("/talent-request")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+               .andExpect(status().isCreated());
+    }
+
+    @Test
+    void shouldReturn400OnInvalidInput() throws Exception {
+        String body = """
+            { "talentRequestTitle": "" }
+            """;
+
+        mockMvc.perform(post("/talent-request")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+               .andExpect(status().isBadRequest());
+    }
+}
+```
+
+### 5. Tests End-to-End
+
+```java
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureMockMvc
+class TalentRequestE2ETest {
+
+    @LocalServerPort
+    private int port;
+
+    @Autowired
+    private TestRestTemplate restTemplate;
+
+    @Test
+    void fullFlowShouldCreateAndReadTalentRequest() {
+        // 1. Create
+        var createPayload = Map.of(
+            "talentRequestTitle", "Dev Java",
+            "startDate", "2026-07-01"
+        );
+        var createResponse = restTemplate.postForEntity(
+            "http://localhost:" + port + "/talent-request",
+            createPayload,
+            Map.class
+        );
+        assertThat(createResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        // 2. Read
+        String id = (String) createResponse.getBody().get("talentRequestId");
+        var getResponse = restTemplate.getForEntity(
+            "http://localhost:" + port + "/talent-request/" + id,
+            Map.class
+        );
+        assertThat(getResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(getResponse.getBody().get("talentRequestTitle")).isEqualTo("Dev Java");
+    }
+}
+```
+
+### Résumé des technologies de test
+
+| Niveau | Framework | Artefact testé |
+|--------|-----------|---------------|
+| Unitaire (Aggregate) | Axon `AggregateTestFixture` | `@CommandHandler`, `@EventSourcingHandler`, invariants |
+| Unitaire (Saga) | Axon `SagaTestFixture` | `@SagaEventHandler`, `@StartSaga`, `@EndSaga` |
+| Intégration (Projection) | `@SpringBootTest` + JPA | `@EventHandler`, `@QueryHandler` |
+| Intégration (API) | `@WebMvcTest` + MockMvc | Contrôleurs REST, validation |
+| E2E | `@SpringBootTest(RANDOM_PORT)` | Flow complet commande + query |
+
+---
+
+## 13. Considérations de Production (Production Considerations)
+
+### Scalabilité
+
+| Dimension | Stratégie TAMS | Détails |
+|-----------|---------------|---------|
+| **Horizontal scaling** | Instances multiples de chaque service | Eureka équilibre les appels HTTP ; Axon Server distribue les événements via gRPC |
+| **Event Processor parallelism** | `thread-count: N` par Event Processor Group | Permet de traiter N événements en parallèle (attention à l'ordre par aggregate) |
+| **Axon Server cluster** | 3+ nœuds en production | Haute disponibilité de l'Event Store, réplication synchrone des événements |
+| **Snapshot threshold** | `threshold: 50` (ajuster selon l'historique) | Réduit le temps de chargement des aggregates longs |
+| **CQRS read scaling** | Répliquer les bases de projection | Lecture scalable indépendamment de l'écriture |
+
+### Base de données persistante (Production vs Dev)
+
+```yaml
+# application-prod.yml
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/talent_requests
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate     # Ne pas créer les tables en prod (utiliser Flyway/Liquibase)
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+axon:
+  axonserver:
+    servers: axonserver-1:8124,axonserver-2:8124,axonserver-3:8124  # Cluster
+  eventhandling:
+    processors:
+      talent-request-group:
+        mode: POOLED         # Pooled Streaming pour production
+        thread-count: 4
+```
+
+### Sécurité
+
+```java
+// Intercepteur de commande pour validation d'autorisation
+@Component
+public class SecurityCommandDispatchInterceptor
+        implements CommandDispatchInterceptor {
+
+    @Override
+    public CommandMessage<?> handle(CommandMessage<?> commandMessage) {
+        // Récupérer le token JWT depuis les métadonnées de la commande
+        String token = commandMessage.getMetaData().get("jwt_token");
+        if (!isAuthorized(token, commandMessage.getPayloadType())) {
+            throw new CommandExecutionException("Unauthorized", null);
+        }
+        return commandMessage;
+    }
+}
+```
+
+| Aspect | Implémentation |
+|--------|---------------|
+| **Authentification** | Spring Security + JWT (Bearer token dans headers HTTP) |
+| **Autorisation des commandes** | `CommandDispatchInterceptor` vérifie les droits avant routage |
+| **Sécurité de l'Event Store** | Axon Server Enterprise supporte TLS + ACL par contexte |
+| **Protection des endpoints** | API Gateway valide le token avant routage vers les services |
+| **Secrets management** | Variables d'environnement (pas de secrets dans `application.yml`) |
+
+### Monitoring & Observabilité
+
+```yaml
+# Actuator + Micrometer
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+```
+
+**Métriques clés à surveiller :**
+
+| Métrique | Source | Seuil d'alerte |
+|----------|--------|---------------|
+| `axon.command.duration` | Micrometer | > 1s (latence anormale) |
+| `axon.event.processor.progress` | Axon Dashboard | Retard > 1000 événements |
+| `axon.snapshot.load.duration` | Micrometer | > 500ms |
+| `jvm.memory.used` | Actuator | > 80% heap |
+| `discovery.health` | Eureka | Instance down |
+
+### Déploiement
+
+#### Docker Compose Production
+
+```yaml
+services:
+  axonserver:
+    image: axoniq/axonserver:enterprise   # Version Enterprise pour cluster
+    environment:
+      - AXONIQ_AXONSERVER_NAME=axonserver-1
+      - AXONIQ_AXONSERVER_HOSTNAME=axonserver-1
+      - AXONIQ_AXONSERVER_DOMAIN=axonserver-cluster
+      - spring.datasource.url=jdbc:postgresql://postgres:5432/axon_event_store
+    volumes:
+      - axon-events:/data/events
+    ports:
+      - "8124:8124"
+      - "8024:8024"
+
+  talent-request-service:
+    build: ./talent-request-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - AXONIQ_AXONSERVER_SERVERS=axonserver-1:8124
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+    deploy:
+      replicas: 3    # 3 instances pour la résilience
+
+  # ... autres services
+```
+
+#### Pipeline CI/CD (GitHub Actions)
+
+```yaml
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with: { java-version: '21' }
+      - run: mvn clean test
+
+  build:
+    needs: test
+    steps:
+      - run: mvn package -DskipTests
+      - uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ghcr.io/tams/${{ matrix.service }}:${{ github.sha }}
+```
+
+### Gestion des erreurs en production
+
+```java
+@ControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(CommandExecutionException.class)
+    public ResponseEntity<ErrorResponse> handleCommandException(
+            CommandExecutionException ex) {
+        return ResponseEntity
+            .badRequest()
+            .body(new ErrorResponse("COMMAND_ERROR", ex.getMessage()));
+    }
+
+    @ExceptionHandler(AxonNonTransientException.class)
+    public ResponseEntity<ErrorResponse> handleNonTransient(
+            AxonNonTransientException ex) {
+        // Erreur fatale — alerter les ops
+        log.error("Non-transient Axon error", ex);
+        return ResponseEntity
+            .status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(new ErrorResponse("AXON_FATAL", "Event Store unreachable"));
+    }
+}
+```
+
+### Checklist de mise en production
+
+- [ ] Remplacer H2 par PostgreSQL (ou autre base relationnelle)
+- [ ] Configurer Axon Server en mode cluster (3 nœuds minimum)
+- [ ] Activer TLS pour les connexions gRPC
+- [ ] Configurer les snapshots (threshold adapté au volume d'événements)
+- [ ] Mettre en place les upcasters pour la version courante des événements
+- [ ] Ajouter Spring Security + JWT
+- [ ] Configurer les health checks Eureka (période, seuil)
+- [ ] Activer les métriques Prometheus + Grafana
+- [ ] Définir les alertes Ops (latence, erreurs, stockage)
+- [ ] Tests de résilience (chaos engineering : tuer des instances, simuler des pannes gRPC)
+
+---
+
+## 14. Points d'Extension & Améliorations Futures
 
 ### Court terme
 - Centraliser la gestion des dépendances dans le POM parent (spring-boot-dependencies, axon-bom)
